@@ -373,6 +373,7 @@ MonoBehaviour:
   squareSize: 1
   lightSquareColor: {r: 0.8632076, g: 0.9179245, b: 1, a: 1}
   darkSquareColor: {r: 0.4009434, g: 0.49808753, b: 1, a: 1}
+  activeSquareColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   FEN: 8/5k2/3p4/1p1Pp2p/pP2Pp1P/P4P1K/8/8
   pieceScale: 0.35
   whitePawn: {fileID: 1197907908, guid: 3a65dc1e9313e4be085086f5ce87c3c8, type: 3}
