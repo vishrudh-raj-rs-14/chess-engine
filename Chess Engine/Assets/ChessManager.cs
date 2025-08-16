@@ -149,7 +149,7 @@ public class ChessBoardGenerator : MonoBehaviour
         
         _squares = new GameObject[8, 8];
         
-        float startX = (8 - 1) * squareSize * 0.5f;
+        float startX = -(8 - 1) * squareSize * 0.5f;
         float startY = (8 - 1) * squareSize * 0.5f;
         
         for (int x = 0; x < 8; x++)
@@ -157,7 +157,7 @@ public class ChessBoardGenerator : MonoBehaviour
             for (int y = 0; y < 8; y++)
             {
                 Vector2 position = new Vector2(
-                    startX - x * squareSize,
+                    startX + x * squareSize,
                     startY - y * squareSize
                 );
                 
