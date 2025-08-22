@@ -33,7 +33,7 @@ namespace Core
         public const int ColorMask = 0b1000;
 
         public static int MakePice(int pieceColor, int pieceType) { return (pieceColor | pieceType); }
-        public static int GetPieceColor(int piece) { return (piece & PieceMask); }
+        public static int GetPieceColor(int piece) { return (piece & ColorMask) >> 3; }
         public static int GetPieceType(int piece) { return (piece & PieceMask); }
 
         public static int GetPieceFromSymbol(char symbol)

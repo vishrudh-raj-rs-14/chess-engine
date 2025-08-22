@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Core;
+using Core.Movegenerator;
 using UnityEngine;
 
 public class ChessBoardGenerator : MonoBehaviour
@@ -13,6 +14,8 @@ public class ChessBoardGenerator : MonoBehaviour
     [SerializeField] private Color lightSquareColor = Color.white;
     [SerializeField] private Color darkSquareColor = Color.black;
     [SerializeField] private Color activeSquareColor = Color.yellow;
+    [SerializeField] private Color validMoveColor = Color.green;
+    [SerializeField] private Color captureSquareColor = Color.red;
     
     [Header("Game Settings")]
     [SerializeField] private string FEN;
@@ -31,11 +34,19 @@ public class ChessBoardGenerator : MonoBehaviour
     private GameObject[,] _squares;
     private Material _darkSquareMaterial;
     private Material _lightSquareMaterial;
+    private Material _activeSquareMaterial;
+    private Material _validMoveMaterial;
+    private Material _captureSquareMaterial;
     private Dictionary<int, Sprite> _pieceToSprite;
     private Board _board;
+    private MoveGenerator _moveGenerator;
 
     // Input handling
     private InputHandler _inputHandler;
+
+    // Valid moves visualization
+    private List<GameObject> _highlightedSquares = new List<GameObject>();
+    private Dictionary<GameObject, Material> _originalMaterials = new Dictionary<GameObject, Material>();
 
     // Events for decoupling
     public static event System.Action<Vector2Int, Vector2Int> OnPieceMoved;
@@ -51,6 +62,7 @@ public class ChessBoardGenerator : MonoBehaviour
     private void Start()
     {
         _board = new Board();
+        _moveGenerator = new MoveGenerator(_board);
         _inputHandler = new InputHandler(_camera, this);
         GenerateBoard();
         SetupBoard(FEN);
@@ -58,7 +70,7 @@ public class ChessBoardGenerator : MonoBehaviour
 
     private void Update()
     {
-        UpdateMaterialColors(); // Only updates if colors changed
+        UpdateMaterialColors();
         _inputHandler.HandleInput();
     }
 
@@ -91,6 +103,9 @@ public class ChessBoardGenerator : MonoBehaviour
     {
         _lightSquareMaterial = CreateSquareMaterial(lightSquareColor);
         _darkSquareMaterial = CreateSquareMaterial(darkSquareColor);
+        _activeSquareMaterial = CreateSquareMaterial(activeSquareColor);
+        _validMoveMaterial = CreateSquareMaterial(validMoveColor);
+        _captureSquareMaterial = CreateSquareMaterial(captureSquareColor);
     }
 
     private Material CreateSquareMaterial(Color color)
@@ -107,12 +122,24 @@ public class ChessBoardGenerator : MonoBehaviour
         
         if (_darkSquareMaterial.color != darkSquareColor)
             _darkSquareMaterial.color = darkSquareColor;
+        
+        if (_activeSquareMaterial.color != activeSquareColor)
+            _activeSquareMaterial.color = activeSquareColor;
+            
+        if (_validMoveMaterial.color != validMoveColor)
+            _validMoveMaterial.color = validMoveColor;
+            
+        if (_captureSquareMaterial.color != captureSquareColor)
+            _captureSquareMaterial.color = captureSquareColor;
     }
 
     private void CleanupMaterials()
     {
         if (_lightSquareMaterial != null) DestroyImmediate(_lightSquareMaterial);
         if (_darkSquareMaterial != null) DestroyImmediate(_darkSquareMaterial);
+        if (_activeSquareMaterial != null) DestroyImmediate(_activeSquareMaterial);
+        if (_validMoveMaterial != null) DestroyImmediate(_validMoveMaterial);
+        if (_captureSquareMaterial != null) DestroyImmediate(_captureSquareMaterial);
     }
     #endregion
 
@@ -147,18 +174,18 @@ public class ChessBoardGenerator : MonoBehaviour
         var position = boardOffset + new Vector2(x * squareSize, -y * squareSize);
         var square = Instantiate(squarePrefab, position, Quaternion.identity, transform);
         
-        ConfigureSquare(square, x, y);
+        ConfigureSquare(square, x+y*8);
         _squares[x, y] = square;
     }
 
-    private void ConfigureSquare(GameObject square, int x, int y)
+    private void ConfigureSquare(GameObject square, int square_count)
     {
-        square.name = $"Square_{x}_{y}";
+        square.name = $"Square_{square_count}";
         
         var chessSquare = square.GetComponent<ChessSquare>();
-        chessSquare.SetCoords(x, y);
+        chessSquare.SetSquare(square_count);
         
-        var isLightSquare = (x + y) % 2 != 0;
+        var isLightSquare = (square_count % 8 + square_count / 8) % 2 != 0;
         var material = isLightSquare ? _lightSquareMaterial : _darkSquareMaterial;
         
         ApplyMaterialToSquare(square, material);
@@ -231,19 +258,60 @@ public class ChessBoardGenerator : MonoBehaviour
         if (_board == null || _squares == null) return;
 
         _board.LoadBoard(fen);
+        RefreshBoardFromSource();
+    }
+
+    /// <summary>
+    /// Refreshes the entire visual board from the underlying board state
+    /// </summary>
+    public void RefreshBoardFromSource()
+    {
+        if (_board == null || _squares == null) return;
         
         for (int x = 0; x < 8; x++)
         {
             for (int y = 0; y < 8; y++)
             {
-                CreatePieceAtSquare(x, y);
+                RefreshSquareFromSource(x, y);
             }
+        }
+        
+        Debug.Log("Board refreshed from source");
+    }
+
+    private void RefreshSquareFromSource(int x, int y)
+    {
+        int squareIndex = x + y * 8;
+        int pieceCode = _board.board[squareIndex];
+        var square = _squares[x, y];
+        var chessSquare = square.GetComponent<ChessSquare>();
+        
+        // Update the square's piece data
+        chessSquare.SetPiece(pieceCode);
+        
+        // Clear any existing piece visuals
+        ClearPieceVisualsFromSquare(square);
+        
+        // Create new piece visual if there's a piece
+        if (pieceCode != Piece.None)
+        {
+            var pieceObject = CreatePieceGameObject(x, y, pieceCode);
+            AttachPieceToSquare(pieceObject, square);
+        }
+    }
+
+    private void ClearPieceVisualsFromSquare(GameObject square)
+    {
+        // Remove all child objects (pieces) from the square
+        for (int i = square.transform.childCount - 1; i >= 0; i--)
+        {
+            DestroyImmediate(square.transform.GetChild(i).gameObject);
         }
     }
 
     private void CreatePieceAtSquare(int x, int y)
     {
-        int pieceCode = _board.board[x, y];
+        int pieceCode = _board.board[x+y*8];
         var square = _squares[x, y];
         var chessSquare = square.GetComponent<ChessSquare>();
         
@@ -273,6 +341,90 @@ public class ChessBoardGenerator : MonoBehaviour
     }
     #endregion
 
+    #region Valid Moves Visualization
+    public void ShowValidMovesForSquare(int squareIndex)
+    {
+        ClearHighlightedSquares();
+        Debug.Log($"Square Index: {squareIndex}");
+        var validMoves = _moveGenerator.GenerateMovesOfPiece(squareIndex);
+        
+        // Highlight the selected square
+        var selectedSquare = GetSquareFromIndex(squareIndex);
+        if (selectedSquare != null)
+        {
+            HighlightSquare(selectedSquare, _activeSquareMaterial);
+        }
+        
+        // Highlight valid move squares
+        foreach (var move in validMoves)
+        {
+            var targetSquare = GetSquareFromIndex(move.TargetSquare);
+            if (targetSquare != null)
+            {
+                // Check if it's a capture move
+                bool isCapture = _board.board[move.TargetSquare] != 0;
+                var material = isCapture ? _captureSquareMaterial : _validMoveMaterial;
+                HighlightSquare(targetSquare, material);
+            }
+        }
+        
+        Debug.Log($"Showing {validMoves.Count} valid moves for square {squareIndex}");
+    }
+
+    private GameObject GetSquareFromIndex(int squareIndex)
+    {
+        int x = squareIndex % 8;
+        int y = squareIndex / 8;
+        
+        if (x >= 0 && x < 8 && y >= 0 && y < 8)
+        {
+            return _squares[x, y];
+        }
+        
+        return null;
+    }
+
+    private void HighlightSquare(GameObject square, Material highlightMaterial)
+    {
+        var renderer = square.GetComponent<Renderer>();
+        if (renderer != null)
+        {
+            // Store original material if not already stored
+            if (!_originalMaterials.ContainsKey(square))
+            {
+                _originalMaterials[square] = renderer.material;
+            }
+            
+            // Apply highlight material
+            renderer.material = highlightMaterial;
+            
+            // Add to highlighted squares list
+            if (!_highlightedSquares.Contains(square))
+            {
+                _highlightedSquares.Add(square);
+            }
+        }
+    }
+
+    public void ClearHighlightedSquares()
+    {
+        foreach (var square in _highlightedSquares)
+        {
+            if (square != null && _originalMaterials.ContainsKey(square))
+            {
+                var renderer = square.GetComponent<Renderer>();
+                if (renderer != null)
+                {
+                    renderer.material = _originalMaterials[square];
+                }
+                _originalMaterials.Remove(square);
+            }
+        }
+        
+        _highlightedSquares.Clear();
+    }
+    #endregion
+
     #region Public Interface
     public bool TryMovePiece(Vector2Int from, Vector2Int to)
     {
@@ -284,40 +436,38 @@ public class ChessBoardGenerator : MonoBehaviour
         // Move piece in game logic
         var piece = fromSquare.GetPiece();
         if (piece == Piece.None) return false;
+        
+        Debug.Log($"{_board.board[fromSquare.GetSquare()]}, {fromSquare.GetSquare()}, {toSquare.GetSquare()}");
 
-        ExecuteMove(fromSquare, toSquare, from, to, piece);
-        OnPieceMoved?.Invoke(from, to);
+        // Check if the move is valid
+        var validMoves = _moveGenerator.GenerateMovesOfPiece(fromSquare.GetSquare());
+        bool isValidMove = false;
+        Move validMove = new Move(-1, -1);
         
-        return true;
-    }
-
-    private void ExecuteMove(ChessSquare fromSquare, ChessSquare toSquare, Vector2Int from, Vector2Int to, int piece)
-    {
-        // Update game logic
-        _board.board[from.x, from.y] = 0;
-        _board.board[to.x, to.y] = piece;
-        
-        // Update UI
-        fromSquare.SetPiece(0);
-        toSquare.SetPiece(piece);
-        
-        // Move piece visual
-        var fromSquareObj = _squares[from.x, from.y];
-        var toSquareObj = _squares[to.x, to.y];
-        
-        if (fromSquareObj.transform.childCount > 0)
+        foreach (var move in validMoves)
         {
-            var pieceTransform = fromSquareObj.transform.GetChild(0);
-            
-            // Remove any existing piece at destination
-            if (toSquareObj.transform.childCount > 0)
+            if (move.TargetSquare == toSquare.GetSquare())
             {
-                DestroyImmediate(toSquareObj.transform.GetChild(0).gameObject);
+                isValidMove = true;
+                validMove = move;
+                break;
             }
-            
-            pieceTransform.SetParent(toSquareObj.transform);
-            pieceTransform.position = toSquareObj.transform.position - Vector3.back;
         }
+
+        if (isValidMove)
+        {
+            // Execute the move in the underlying board
+            _board.MakeMove(validMove, false);
+            
+            // Refresh the entire visual board from the true source
+            RefreshBoardFromSource();
+            
+            ClearHighlightedSquares(); // Clear highlights after move
+            OnPieceMoved?.Invoke(from, to);
+            return true;
+        }
+        
+        return false;
     }
 
     public bool IsValidSquare(Vector2Int coords)
@@ -329,16 +479,22 @@ public class ChessBoardGenerator : MonoBehaviour
     {
         return IsValidSquare(coords) ? _squares[coords.x, coords.y] : null;
     }
+    
+    public void OnSquareClicked(int squareIndex)
+    {
+        ShowValidMovesForSquare(squareIndex);
+    }
     #endregion
 }
 
-// Separate input handling for better organization
+// Updated InputHandler with valid move visualization
 public class InputHandler
 {
     private Camera _camera;
     private ChessBoardGenerator _boardGenerator;
     private GameObject _activePiece;
     private Vector2Int _originalSquare;
+    private bool _isDragging = false;
 
     public InputHandler(Camera camera, ChessBoardGenerator boardGenerator)
     {
@@ -356,7 +512,7 @@ public class InputHandler
         {
             HandleMouseDrag();
         }
-        else if (Input.GetMouseButtonUp(0) && _activePiece != null)
+        else if (Input.GetMouseButtonUp(0))
         {
             HandleMouseUp();
         }
@@ -367,33 +523,50 @@ public class InputHandler
         var worldPos = GetMouseWorldPosition();
         var hit = Physics2D.Raycast(worldPos, Vector2.zero);
 
-        if (hit.collider != null && _activePiece == null)
+        if (hit.collider != null)
         {
-            TrySelectPiece(hit.collider.gameObject);
+            var chessSquare = hit.collider.GetComponent<ChessSquare>();
+            if (chessSquare != null)
+            {
+                // Show valid moves for the clicked square
+                _boardGenerator.OnSquareClicked(chessSquare.GetSquare());
+                
+                // If there's a piece on this square, prepare for dragging
+                if (hit.collider.transform.childCount > 0)
+                {
+                    TrySelectPiece(hit.collider.gameObject);
+                }
+            }
         }
     }
 
     private void HandleMouseDrag()
     {
+        if (!_isDragging) return;
+        
         var worldPos = GetMouseWorldPosition();
         _activePiece.transform.position = worldPos;
     }
 
     private void HandleMouseUp()
     {
-        var worldPos = GetMouseWorldPosition();
-        var hit = Physics2D.Raycast(worldPos, Vector2.zero);
-
-        if (hit.collider != null)
+        if (_activePiece != null)
         {
-            TryDropPiece(hit.collider.gameObject);
-        }
-        else
-        {
-            ReturnPieceToOriginal();
-        }
+            var worldPos = GetMouseWorldPosition();
+            var hit = Physics2D.Raycast(worldPos, Vector2.zero);
 
-        _activePiece = null;
+            if (hit.collider != null)
+            {
+                TryDropPiece(hit.collider.gameObject);
+            }
+            else
+            {
+                ReturnPieceToOriginal();
+            }
+
+            _activePiece = null;
+            _isDragging = false;
+        }
     }
 
     private void TrySelectPiece(GameObject hitObject)
@@ -403,7 +576,8 @@ public class InputHandler
         {
             _activePiece = pieceTransform.gameObject;
             var chessSquare = hitObject.GetComponent<ChessSquare>();
-            _originalSquare = chessSquare.GetCoords();
+            _originalSquare = new Vector2Int(chessSquare.GetSquare() % 8, chessSquare.GetSquare() / 8);
+            _isDragging = true;
             
             Debug.Log($"Selected piece at {_originalSquare}");
         }
@@ -414,11 +588,12 @@ public class InputHandler
         var chessSquare = targetSquare.GetComponent<ChessSquare>();
         if (chessSquare != null)
         {
-            var targetCoords = chessSquare.GetCoords();
-            if(targetCoords == _originalSquare)
+            var targetCoords = new Vector2Int(chessSquare.GetSquare() % 8, chessSquare.GetSquare() / 8);
+            
+            if (targetCoords == _originalSquare)
             {
-                 ReturnPieceToOriginal();
-                 return;
+                ReturnPieceToOriginal();
+                return;
             }
             
             if (_boardGenerator.TryMovePiece(_originalSquare, targetCoords))
@@ -428,6 +603,7 @@ public class InputHandler
             else
             {
                 ReturnPieceToOriginal();
+                Debug.Log("Invalid move attempted");
             }
         }
         else

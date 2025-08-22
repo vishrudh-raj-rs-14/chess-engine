@@ -2,21 +2,19 @@ using UnityEngine;
 
 public class ChessSquare : MonoBehaviour
 {
-    private int _x;
-    private int _y;
+    private int _square;
     
 
     private int _piece;
 
-    public Vector2Int GetCoords()
+    public int GetSquare()
     {
-        return new Vector2Int(_x,_y);
+        return _square;
     }
 
-    public void SetCoords(int x, int y)
+    public void SetSquare(int square)
     {
-        _x = x;
-        _y = y;
+        _square = square;
     }
     public int GetPiece()
     {
